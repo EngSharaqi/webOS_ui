@@ -1,6 +1,6 @@
 # webOS_ui
 
-An Apple TV-style home screen for LG TVs, installed through LG's own Developer Mode — no root, and
+An Apple TV-style home screen for TVs, installed through LG's own Developer Mode — no root, and
 deleting the Developer Mode app removes every trace of it.
 
 Built and tested on an **LG 43LM6300PVB, webOS 4.5** (firmware 05.40.97), whose browser engine is
