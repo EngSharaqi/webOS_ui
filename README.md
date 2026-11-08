@@ -1,7 +1,26 @@
-# webos-vibehack
+# webOS_ui
 
-An Apple TV-style home screen for LG TVs. It's a webOS port of the launcher from
+An Apple TV-style home screen for LG TVs. A fork of
+[OmkarK97/webos-vibehack](https://github.com/OmkarK97/webos-vibehack) (MIT), itself a webOS port of
 [tv-vibehack](https://github.com/Gathin23/tv-vibehack), which does the same for Android TVs.
+
+## What this fork adds
+
+Tested on an **LG 43LM6300PVB, webOS 4.5** (firmware 05.40.97), whose browser engine is roughly
+Chromium 53 — six years older than the one the original was built against.
+
+- **webOS 4.5 compatibility.** `inset: 0` needs Chrome 87; on 4.5 it is ignored, so `#viewport`
+  collapsed to 0×0 and `overflow: hidden` clipped every tile. All four uses are now longhand
+  `top/right/bottom/left`.
+- **Tile and glow colours measured ahead of time** (`bake-colors.py`). The launcher used to sample
+  icon pixels through a canvas at runtime, but webOS serves the app from `file://`, where
+  `getImageData()` throws on a tainted canvas — every tile fell back to its declared colour, which
+  for several apps is plain black. The colours are now computed on the computer during `install.sh`
+  and written into `apps.js`.
+- **Categories.** `config.js` takes a `categories` list; the grid grows a heading per section and
+  anything uncategorised collects under `otherTitle`.
+- **Rearranging across sections.** An **Edit** pill in the top bar, alongside holding OK, and a
+  tile dragged into another section now joins it. The arrangement is saved per section.
 
 ![The launcher running on an LG OLED C6](docs/screenshot.jpg)
 

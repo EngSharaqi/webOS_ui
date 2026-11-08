@@ -13,6 +13,7 @@
   var ROW_PITCH = 292;
   var DOCK_TOP = 708;           // tile top of the dock row: next row peeks in at the bottom
   var DOCK_GAP = 36;            // extra space below the dock
+  var HEADER_H = 96;            // space a section title takes above its first row
   var FOCUS_SCALE = 1.1;
   var GLASS_PAD = 12;           // room for the glass glow around the scaled tile
   var VIEW_TOP = 80, VIEW_BOTTOM = 1060;    // area grid rows scroll into (the header hides below the dock)
@@ -30,10 +31,14 @@
   var $ = function (id) { return document.getElementById(id); };
   var stage = $('stage'), tilesEl = $('tiles'), glass = $('glass'), hero = $('hero');
   var ambients = [$('ambientA'), $('ambientB')], ambientFront = 0, ambientColor = null;
-  var pills = [$('btnInputs'), $('btnWifi'), $('btnSettings')];
+  var pills = [$('btnInputs'), $('btnWifi'), $('btnSettings'), $('btnEdit')];
   var panel = $('inputsPanel');
 
-  var items = [];               // {app, el, color}
+  var items = [];               // {app, el, color, row, col} in one flat list, section by section
+  var counts = [];              // how many of items belong to each section, in order
+  var titles = [];              // each section's heading; the dock's is null
+  var heads = [];               // the heading elements, one per section
+  var rows = [];                // {top, section, items: [index into items]}
   var zone = 'grid';            // 'grid' | 'top' | 'inputs'
   var focused = 0, pillFocus = 0, inputFocus = 0, inputRows = [];
   var offset = 0, heroShown = false, glassShown = false;
@@ -76,39 +81,60 @@
 
   // ---- apps ----------------------------------------------------------------------------------
 
-  function orderedApps() {
+  /** The dock, then one group per configured category, then everything left over. */
+  function sectionPlan() {
     var all = (window.TV_APPS && TV_APPS.apps) || [];
     var byId = {};
     all.forEach(function (a) { byId[a.id] = a; });
-    var hidden = {};
-    (CONFIG.hiddenApps || []).forEach(function (id) { hidden[id] = true; });
+    var taken = {};
+    (CONFIG.hiddenApps || []).forEach(function (id) { taken[id] = true; });
     var byTitle = function (a, b) { return a.title.toLowerCase() < b.title.toLowerCase() ? -1 : 1; };
 
-    // An order arranged on the TV wins, until dockApps in config.js changes.
+    var secTitles = [null];                                         // the dock carries no heading
+    (CONFIG.categories || []).forEach(function (c) { secTitles.push(c.title); });
+    secTitles.push(CONFIG.otherTitle || 'More');
+    var groups = secTitles.map(function () { return []; });
+
+    var take = function (ids, into) {
+      (ids || []).forEach(function (id) {
+        if (byId[id] && !taken[id]) { into.push(byId[id]); taken[id] = true; }
+      });
+    };
+
+    // An arrangement made on the TV wins, until the categories in config.js change.
     var saved = loadOrder();
     if (saved) {
-      var placed = [];
-      saved.forEach(function (id) {
-        if (byId[id] && !hidden[id]) { placed.push(byId[id]); hidden[id] = true; }
+      groups.forEach(function (g, i) { take(saved[i], g); });
+    } else {
+      take(CONFIG.dockApps, groups[0]);
+      (CONFIG.categories || []).forEach(function (cat, i) {
+        take(cat.apps, groups[i + 1]);
+        groups[i + 1].sort(byTitle);
       });
-      return placed.concat(all.filter(function (a) { return !hidden[a.id]; }).sort(byTitle));
     }
 
-    var dock = [];
-    (CONFIG.dockApps || []).forEach(function (id) {
-      if (byId[id] && !hidden[id] && dock.length < COLUMNS) { dock.push(byId[id]); hidden[id] = true; }
-    });
-    var rest = all.filter(function (a) { return !hidden[a.id]; });
-    rest.sort(byTitle);
-    return dock.concat(rest);
+    // Never placed, or newly installed since the arrangement was saved: into the last section.
+    var rest = all.filter(function (a) { return !taken[a.id]; }).sort(byTitle);
+    groups[groups.length - 1] = groups[groups.length - 1].concat(rest);
+
+    for (var i = groups.length - 1; i > 0; i--) {                   // drop sections left empty
+      if (!groups[i].length) { groups.splice(i, 1); secTitles.splice(i, 1); }
+    }
+    return { titles: secTitles, groups: groups };
   }
 
   var ORDER_KEY = 'tvhome.order';
 
+  /** The config an arrangement was made against: change the categories and it starts fresh. */
+  function configSignature() {
+    return (CONFIG.dockApps || []).join(',') + '|' +
+      (CONFIG.categories || []).map(function (c) { return c.title; }).join(',');
+  }
+
   function loadOrder() {
     try {
       var s = JSON.parse(localStorage.getItem(ORDER_KEY));
-      return s && s.dock === (CONFIG.dockApps || []).join(',') ? s.ids : null;
+      return s && s.sig === configSignature() ? s.sections : null;
     } catch (e) {
       return null;
     }
@@ -116,20 +142,67 @@
 
   function saveOrder() {
     try {
-      localStorage.setItem(ORDER_KEY, JSON.stringify({
-        dock: (CONFIG.dockApps || []).join(','),
-        ids: items.map(function (it) { return it.app.id; })
-      }));
+      var sections = [], at = 0;
+      counts.forEach(function (n) {
+        sections.push(items.slice(at, at + n).map(function (it) { return it.app.id; }));
+        at += n;
+      });
+      localStorage.setItem(ORDER_KEY, JSON.stringify({ sig: configSignature(), sections: sections }));
     } catch (e) { /* storage unavailable: the order lasts until the app restarts */ }
   }
 
-  function rowOf(i) { return Math.floor(i / COLUMNS); }
-  function tileLeft(i) { return 112 + (i % COLUMNS) * CELL_W + (CELL_W - TILE_W) / 2; }
-  function tileTop(i) { var r = rowOf(i); return DOCK_TOP + r * ROW_PITCH + (r > 0 ? DOCK_GAP : 0); }
+  function rowOf(i) { return items[i] ? items[i].row : 0; }
+  function colOf(i) { return items[i] ? items[i].col : 0; }
+  function tileLeft(i) { return 112 + colOf(i) * CELL_W + (CELL_W - TILE_W) / 2; }
+  function tileTop(i) { var r = rows[rowOf(i)]; return r ? r.top : DOCK_TOP; }
+  function sectionOf(i) { var r = rows[rowOf(i)]; return r ? r.section : 0; }
+
+  /** Walks the sections top to bottom, giving every tile a row and column and every heading a place. */
+  function computeLayout() {
+    rows = [];
+    var y = DOCK_TOP, at = 0;
+    counts.forEach(function (n, s) {
+      if (s > 0 && heads[s]) {
+        heads[s].hidden = !n;                   // a section emptied by rearranging loses its title
+        if (n) {
+          heads[s].style.top = (y + 20) + 'px';
+          y += HEADER_H;
+        }
+      }
+      for (var k = 0; k < n; k += COLUMNS) {
+        var row = { top: y, section: s, items: [] };
+        for (var c = 0; c < COLUMNS && k + c < n; c++) {
+          items[at + k + c].row = rows.length;
+          items[at + k + c].col = c;
+          row.items.push(at + k + c);
+        }
+        rows.push(row);
+        y += ROW_PITCH;
+      }
+      if (s === 0) y += DOCK_GAP;
+      at += n;
+    });
+  }
 
   function build() {
     tilesEl.innerHTML = '';
-    items = orderedApps().map(function (app) {
+    var plan = sectionPlan();
+    titles = plan.titles;
+    counts = plan.groups.map(function (g) { return g.length; });
+
+    heads = titles.map(function (title, s) {
+      if (s === 0) return null;                 // the dock is named by the top shelf instead
+      var h = document.createElement('div');
+      h.className = 'section';
+      h.textContent = title;
+      tilesEl.appendChild(h);
+      return h;
+    });
+
+    var flat = [];
+    plan.groups.forEach(function (g) { g.forEach(function (a) { flat.push(a); }); });
+
+    items = flat.map(function (app) {
       var el = document.createElement('div');
       el.className = 'item';
       var card = document.createElement('div');
@@ -138,6 +211,7 @@
       var item = { app: app, el: el, card: card, color: null };
       img.onload = function () { paintTile(item, img); };
       img.src = app.icon;
+      if (app.tileColor) paintTile(item, img);    // baked: no need to wait for the icon to load
       card.appendChild(img);
       el.appendChild(card);
       var name = document.createElement('div');
@@ -159,16 +233,17 @@
 
   /** Places every tile by its position in items; tiles glide when the order changes. */
   function layout() {
+    computeLayout();
     items.forEach(function (it, i) {
       it.el.style.left = tileLeft(i) + 'px';
       it.el.style.top = tileTop(i) + 'px';
-      it.el.classList.toggle('dock', rowOf(i) === 0);   // the dock has no labels: the top shelf names it
+      it.el.classList.toggle('dock', sectionOf(i) === 0);   // the dock has no labels: the top shelf names it
     });
 
     var band = $('dockBand');
-    var n = Math.min(COLUMNS, items.length);
+    var n = Math.min(COLUMNS, counts[0] || 0);
     band.style.display = n ? 'block' : 'none';
-    band.style.left = (tileLeft(0) - 28) + 'px';
+    band.style.left = (112 + (CELL_W - TILE_W) / 2 - 28) + 'px';
     band.style.top = (DOCK_TOP - 28) + 'px';
     band.style.width = ((n - 1) * CELL_W + TILE_W + 56) + 'px';
     band.style.height = (TILE_H + 56) + 'px';
@@ -186,6 +261,17 @@
    * reads as a banner. LG's system icons are glyphs on transparent: use the app's own colour.
    */
   function paintTile(item, img) {
+    // bake-colors.py measures the icons on a computer and writes the answers into apps.js: webOS
+    // serves this app from file://, where reading pixels back out of a canvas is blocked.
+    var baked = parseColor(item.app.tileColor);
+    if (baked) {
+      item.card.style.background = 'rgb(' + baked.join(',') + ')';
+      if (item.app.glyph) item.card.classList.add('glyph');
+      item.color = parseColor(item.app.glowColor) || baked;
+      if (items[focused] === item) setAmbient(item.color);
+      return;
+    }
+
     var px = null, edge = null;
     try {
       var c = document.createElement('canvas');
@@ -296,8 +382,8 @@
     focused = i;
     items[i].el.classList.add('focused');
 
-    var top = tileTop(i), row = rowOf(i);
-    if (row === 0) {
+    var top = tileTop(i), inDock = sectionOf(i) === 0;
+    if (inDock) {
       offset = 0;
     } else {
       // Scroll just enough so the whole glass and the name below the tile are visible.
@@ -324,7 +410,7 @@
       glassShown = true;
     }
 
-    if (row === 0) showHero(items[i]);
+    if (inDock) showHero(items[i]);
     else hideHero();
     setAmbient(items[i].color);   // the glow follows the focused tile in every row
   }
@@ -436,7 +522,8 @@
   function activatePill(i) {
     if (i === 0) showInputs();
     else if (i === 1) launch('com.palm.app.settings', 'Settings', { target: 'network' });
-    else launch('com.palm.app.settings', 'Settings');
+    else if (i === 2) launch('com.palm.app.settings', 'Settings');
+    else { focusTile(focused); startEdit(); }
   }
 
   // ---- inputs dropdown -----------------------------------------------------------------------
@@ -495,15 +582,36 @@
   function startEdit() {
     var it = items[focused];
     if (!it) return;
-    editing = { item: it, snapshot: items.slice() };
+    editing = { item: it, snapshot: items.slice(), sizes: counts.slice() };
     it.el.classList.add('moving');
     document.body.classList.add('editing');
     toast('Arrows to move  ·  OK to place  ·  Back to cancel');
   }
 
+  /** Which section a place in the flat list falls in, by walking the section sizes. */
+  function sectionAt(i) {
+    var at = 0;
+    for (var s = 0; s < counts.length; s++) {
+      at += counts[s];
+      if (i < at) return s;
+    }
+    return counts.length - 1;
+  }
+
+  /** The tile at a column in another row, or that row's last one when it is shorter. */
+  function nearestIn(r, col) {
+    var row = rows[r];
+    return row.items[Math.min(col, row.items.length - 1)];
+  }
+
+  /** Moves the tile being arranged, handing it to whichever section it lands in. */
   function moveTo(to) {
-    if (to < 0 || to >= items.length || to === focused) return;
-    items.splice(to, 0, items.splice(focused, 1)[0]);
+    to = Math.max(0, Math.min(to, items.length - 1));
+    if (to === focused) return;
+    counts[sectionAt(focused)]--;
+    var moved = items.splice(focused, 1)[0];
+    counts[sectionAt(to)]++;
+    items.splice(to, 0, moved);
     focused = to;
     layout();
     focusTile(to);
@@ -513,6 +621,7 @@
     var it = editing.item;
     if (!keep) {
       items = editing.snapshot;
+      counts = editing.sizes;
       layout();
     }
     editing = null;
@@ -544,10 +653,11 @@
     if (k === KEY.OK && okDown) { e.preventDefault(); return; }   // key repeat while held
     if (k === KEY.OK) okDown = true;
     if (editing) {
+      var er = rowOf(focused), ec = colOf(focused);
       if (k === KEY.LEFT) moveTo(focused - 1);
       else if (k === KEY.RIGHT) moveTo(focused + 1);
-      else if (k === KEY.UP) moveTo(focused - COLUMNS);
-      else if (k === KEY.DOWN) moveTo(Math.min(focused + COLUMNS, items.length - 1));
+      else if (k === KEY.UP) moveTo(er > 0 ? nearestIn(er - 1, ec) : 0);
+      else if (k === KEY.DOWN) moveTo(er + 1 < rows.length ? nearestIn(er + 1, ec) : items.length - 1);
       else if (k === KEY.OK) finishEdit(true);
       else if (k === KEY.BACK || k === KEY.ESC) finishEdit(false);
       else return;
@@ -565,14 +675,14 @@
       else if (k === KEY.BACK) { /* home screen: Back goes nowhere */ }
       else return;
     } else {
-      var col = focused % COLUMNS, last = items.length - 1;
-      if (k === KEY.LEFT) { if (col > 0) focusTile(focused - 1); }
-      else if (k === KEY.RIGHT) { if (col < COLUMNS - 1 && focused < last) focusTile(focused + 1); }
+      var r = rowOf(focused), col = colOf(focused);
+      if (k === KEY.LEFT) { if (col > 0) focusTile(rows[r].items[col - 1]); }
+      else if (k === KEY.RIGHT) { if (col + 1 < rows[r].items.length) focusTile(rows[r].items[col + 1]); }
       else if (k === KEY.UP) {
-        if (rowOf(focused) === 0) focusPill(pillAbove(focused));
-        else focusTile(focused - COLUMNS);
+        if (r === 0) focusPill(pillAbove(focused));
+        else focusTile(nearestIn(r - 1, col));
       } else if (k === KEY.DOWN) {
-        if (rowOf(focused) < rowOf(last)) focusTile(Math.min(focused + COLUMNS, last));
+        if (r + 1 < rows.length) focusTile(nearestIn(r + 1, col));
       } else if (k === KEY.OK) {
         okTimer = setTimeout(function () { okTimer = null; startEdit(); }, LONG_PRESS_MS);
       } else if (k === KEY.BACK) { /* home screen: Back goes nowhere */ }

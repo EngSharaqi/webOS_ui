@@ -21,6 +21,10 @@ PY="${PY:-python3}"
 [ -x venv/bin/python ] && PY=venv/bin/python
 "$PY" sync-apps.py "$TV_HOST"
 
+# Measure each icon's colour here: webOS serves the app from file://, where reading pixels back
+# out of a canvas is blocked, so the launcher cannot work them out for itself at runtime.
+"$PY" bake-colors.py app || echo "bake-colors.py needs Pillow (pip install pillow); tiles fall back to flat colours."
+
 if [ ! -f app/icon.png ]; then
   # The webOS app list wants PNG icons: 80px and 130px.
   sips -s format png -z 80 80 assets/icon.jpg --out app/icon.png >/dev/null
