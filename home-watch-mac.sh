@@ -2,12 +2,12 @@
 # Run home-watch.py in the background on this Mac: starts at login, restarts if it stops.
 #   TV_HOST=192.168.1.50 ./home-watch-mac.sh            # install / update
 #   ./home-watch-mac.sh uninstall
-# Log: ~/Library/Logs/tv-vibehack-home-watch.log
+# Log: ~/Library/Logs/webos-ui-home-watch.log
 set -euo pipefail
 cd "$(dirname "$0")"
-LABEL=com.tvvibehack.homewatch
+LABEL=com.webosui.homewatch
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOG="$HOME/Library/Logs/tv-vibehack-home-watch.log"
+LOG="$HOME/Library/Logs/webos-ui-home-watch.log"
 
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 if [ "${1:-}" = uninstall ]; then

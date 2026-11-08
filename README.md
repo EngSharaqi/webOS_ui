@@ -1,59 +1,56 @@
 # webOS_ui
 
-An Apple TV-style home screen for LG TVs. A fork of
-[OmkarK97/webos-vibehack](https://github.com/OmkarK97/webos-vibehack) (MIT), itself a webOS port of
-[tv-vibehack](https://github.com/Gathin23/tv-vibehack), which does the same for Android TVs.
+An Apple TV-style home screen for LG TVs, installed through LG's own Developer Mode — no root, and
+deleting the Developer Mode app removes every trace of it.
 
-## What this fork adds
+Built and tested on an **LG 43LM6300PVB, webOS 4.5** (firmware 05.40.97), whose browser engine is
+roughly Chromium 53 — so everything here is written to run on an engine from 2016.
 
-Tested on an **LG 43LM6300PVB, webOS 4.5** (firmware 05.40.97), whose browser engine is roughly
-Chromium 53 — six years older than the one the original was built against.
+![The home screen](docs/home.png)
 
-- **webOS 4.5 compatibility.** `inset: 0` needs Chrome 87; on 4.5 it is ignored, so `#viewport`
-  collapsed to 0×0 and `overflow: hidden` clipped every tile. All four uses are now longhand
-  `top/right/bottom/left`.
-- **Tile and glow colours measured ahead of time** (`bake-colors.py`). The launcher used to sample
-  icon pixels through a canvas at runtime, but webOS serves the app from `file://`, where
-  `getImageData()` throws on a tainted canvas — every tile fell back to its declared colour, which
-  for several apps is plain black. The colours are now computed on the computer during `install.sh`
-  and written into `apps.js`.
+## What it does
+
+- **A tvOS layout.** A top row of four apps with the focused app's name above it, a glow in that
+  app's colour behind everything, your apps in categories below, and Inputs (HDMI ports and Live
+  TV), Wi-Fi and Settings in a row of frosted pills. The header slides away as the grid scrolls up
+  into it, and one glass ring springs between tiles as the focus moves.
+- **The top row is what you open.** It is not a hand-pinned dock: the launcher counts how often you
+  open each app, with a three-day half-life, and the four it lands on sit at the top — as well as
+  in their own category, so nothing moves out of where you look for it. `dockApps` in `config.js`
+  fills the row until there is enough history. Nothing leaves the TV: the count lives in the app's
+  own `localStorage`.
 - **Categories.** `config.js` takes a `categories` list; the grid grows a heading per section and
   anything uncategorised collects under `otherTitle`.
-- **The top row is what you open.** It is no longer a hand-pinned dock: the launcher counts how
-  often you open each app, with a three-day half-life, and the four it lands on sit in the top row —
-  as well as in their own category, so nothing moves out of where you look for it. `dockApps` in
-  `config.js` fills the row until there is enough history. Nothing leaves the TV: the count is in
-  the app's own `localStorage`.
 - **Rearranging in two steps.** The **Edit** pill, or holding OK on a tile, turns arranging on and
   it stays on: the arrows walk the grid, OK takes a tile in hand, OK again puts it down, and Back
   leaves. A tile carried into another section joins it, and the arrangement is saved per section.
   The top row is the launcher's own and is not rearranged by hand.
-- **A held OK is recognised on any remote.** webOS remotes disagree about what a held key sends —
-  one keydown, repeating keydowns, or keydown/keyup pairs — and on this TV the pairs made every
-  hold open the app instead. The hold is now timed from the first keydown and the press counts as
-  over only once nothing has arrived for 180 ms.
-- **A quieter focus.** The white wash and outer glow over the focused tile are gone; what springs
-  between tiles is a thin glass ring, and the tile itself grows a little more instead.
+- **Tile and glow colours measured ahead of time** (`bake-colors.py`). Sampling an icon's pixels in
+  the browser does not work here: webOS serves the app from `file://`, where `getImageData()`
+  throws on a tainted canvas, and every tile falls back to its declared colour — plain black for
+  several apps. The colours are computed on the computer during `install.sh` and written into
+  `apps.js` instead.
+- **A held OK is recognised on any remote.** webOS remotes disagree about what a held key sends:
+  one keydown, repeating keydowns, or keydown/keyup pairs. The hold is timed from the first
+  keydown, and the press counts as over only once nothing has arrived for 180 ms.
+- **Written for webOS 4.5.** The `inset` shorthand needs Chrome 87; on 4.5 it is ignored, which
+  collapses a positioned layer to 0×0 and clips everything inside it. Positioning is longhand
+  `top/right/bottom/left` throughout.
 
-![The launcher running on an LG OLED C6](docs/screenshot.jpg)
+![The grid, with categories](docs/categories.png)
 
-The screenshot is the original's, on an LG OLED C6 (webOS 26).
+## What webOS allows
 
-## What's different from Android
+webOS is more locked down than Android TV, and three things follow from that:
 
-webOS is more locked down than Android TV, so three things work differently:
+- **Installing** goes through LG's **Developer Mode** app and a free LG developer account.
+- **The app list** is read from your computer by `sync-apps.py` and bundled into the package —
+  webOS does not let an app list what else is installed.
+- **The Home button** always opens LG's home. `home-watch.py`, running on another device on the
+  same network, switches straight back (about 0.1 s).
 
-| | Android TV | LG webOS |
-|---|---|---|
-| Install | ADB, no account | LG's **Developer Mode** app (free LG developer account) |
-| App list | read on the TV | read from your computer by `sync-apps.py` and bundled in; webOS won't let an app list installed apps |
-| Home button | the launcher *is* Home | webOS always opens LG's home; `home-watch.py`, running on another device, switches straight back (about 0.1 s) |
-
-There's no debloat step: webOS has no ADB-style package disabling. Turn off LG's ads in the TV's
+There is no debloat step: webOS has no ADB-style package disabling. Turn off LG's ads in the TV's
 own settings instead (see [Cleaning up LG's home](#cleaning-up-lgs-home)).
-
-Nothing is rooted. Developer Mode is LG's official way to install your own apps, firmware updates
-keep working, and deleting the Developer Mode app removes everything.
 
 ## Setup
 
@@ -86,8 +83,8 @@ TV_HOST=192.168.1.50 ./install.sh
 ```
 
 The first run shows an "allow this device?" prompt on the TV: accept it. That pairing lets
-`sync-apps.py` read your apps and icons. `install.sh` then packages the app, installs it and opens
-it. Run it again whenever you install or remove apps on the TV.
+`sync-apps.py` read your apps and icons. `install.sh` then measures the icon colours, packages the
+app, installs it and opens it. Run it again whenever you install or remove apps on the TV.
 
 **4. A one-press shortcut**
 
@@ -96,10 +93,10 @@ holding 1 opens the launcher from anywhere.
 
 ## The Home button
 
-webOS hard-wires Home to LG's home, and blocks Developer Mode apps from seeing which app is in front,
-so the TV can't redirect it on its own. [`home-watch.py`](home-watch.py) does it from another
-always-on device on the same network: it watches the TV's foreground app and, the moment LG's home
-appears, opens the launcher on top.
+webOS hard-wires Home to LG's home, and blocks Developer Mode apps from seeing which app is in
+front, so the TV cannot redirect it on its own. [`home-watch.py`](home-watch.py) does it from
+another always-on device on the same network: it watches the TV's foreground app and, the moment
+LG's home appears, opens the launcher on top.
 
 - **Press Home twice** within three seconds to stay on LG's home, for its menus.
 - When the TV powers on to LG's home, it goes to the launcher too.
@@ -112,19 +109,15 @@ TV_HOST=192.168.1.50 ./home-watch-mac.sh       # install or update
 ./home-watch-mac.sh uninstall                  # remove
 ```
 
-macOS will ask for Local Network access for Python: allow it (System Settings → Privacy & Security →
-Local Network), or the watcher logs "No route to host". The log is at
-`~/Library/Logs/tv-vibehack-home-watch.log`. A Mac only redirects Home while it's awake and at
-home; for every time, run `python3 home-watch.py 192.168.1.50` on something that's always on, such
+macOS will ask for Local Network access for Python: allow it (System Settings → Privacy & Security
+→ Local Network), or the watcher logs "No route to host". The log is at
+`~/Library/Logs/webos-ui-home-watch.log`. A Mac only redirects Home while it is awake and at
+home; for every time, run `python3 home-watch.py 192.168.1.50` on something that is always on, such
 as a Raspberry Pi.
 
 ## Using it
 
-Close to the [Android launcher](https://github.com/Gathin23/tv-vibehack#the-launcher): a top row of
-four apps with the focused app's name above it and a glow in its colour, your apps in categories
-below, and Inputs (HDMI ports and Live TV), Wi-Fi and Settings at the top. The header slides away
-when the grid scrolls into it. Unlike the Android one, the top row holds the apps you open most
-rather than a fixed dock.
+**Move around** with the arrows; **OK** opens an app. From the top row, **up** goes to the pills.
 
 **Rearrange tiles on the TV**: the **Edit** pill, or holding **OK** on a tile, starts arranging.
 Then the arrows move between tiles, **OK** takes one in hand (it wiggles) and **OK** puts it down,
@@ -150,19 +143,21 @@ For when you do land on it. Names vary a little by webOS version:
 - **Pairing fails with "403 Pairing rejected: blacklisted certificate detected".** Newer firmware
   rejects the signed manifest that open-source LG clients share. `lgtv.py` pairs with an unsigned
   one, which still works.
-- **No pairing prompt on the TV.** Turn on the TV's option for connecting from mobile apps (on the
-  C6: Settings → General → Devices → External Devices; named "LG Connect Apps" or similar).
+- **No pairing prompt on the TV.** Turn on the TV's option for connecting from mobile apps
+  (Settings → General → Devices → External Devices; named "LG Connect Apps" or similar).
 - **`ares` says "All configured authentication methods failed".** The device profile is missing
   its key: run the third command in step 2 again.
-- **Apps stop opening after a while.** Developer Mode sessions expire (LG shows the time left in
-  the Developer Mode app; it was 999 hours on our C6). Press **Extend Session Time** there.
+- **Tiles come out black.** `bake-colors.py` needs Pillow: `venv/bin/pip install pillow`, then run
+  `install.sh` again.
+- **Apps stop opening after a while.** Developer Mode sessions expire — on webOS 4.5 after 50
+  hours. Open the Developer Mode app and press **Extend Session Time**.
 
 ## Files
 
 | File | What it does |
 |---|---|
 | [`app/`](app/) | The launcher: `index.html`, `style.css`, `app.js`, `config.js`, `appinfo.json` |
-| [`install.sh`](install.sh) | Syncs your apps, packages and installs the launcher, and opens it |
+| [`install.sh`](install.sh) | Syncs your apps, measures the colours, packages and installs the launcher, and opens it |
 | [`sync-apps.py`](sync-apps.py) | Reads apps, icons and HDMI inputs from the TV into `app/apps.js` and `app/icons/` |
 | [`bake-colors.py`](bake-colors.py) | Measures each icon's tile and glow colour into `app/apps.js` (needs Pillow) |
 | [`home-watch.py`](home-watch.py) | Sends the Home button to the launcher |
@@ -170,8 +165,7 @@ For when you do land on it. Names vary a little by webOS version:
 | [`lgtv.py`](lgtv.py) | Pairs with and talks to the TV's remote-control service |
 | [`assets/icon.jpg`](assets/icon.jpg) | The app icon, resized to PNG by `install.sh` |
 
-## Credits
+## License
 
-The design, layout and app icon come from [tv-vibehack](https://github.com/Gathin23/tv-vibehack)
-by [Gathin](https://github.com/Gathin23). The Outfit font is under the SIL Open Font License
-([`app/fonts/OFL.txt`](app/fonts/OFL.txt)). MIT licensed, see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE), which carries the copyright notices this code is released under.
+The Outfit font is under the SIL Open Font License ([`app/fonts/OFL.txt`](app/fonts/OFL.txt)).

@@ -1,7 +1,7 @@
 {
   "id": "com.gathin.tvhome",
   "version": "1.0.0",
-  "vendor": "tv-vibehack",
+  "vendor": "webOS_ui",
   "type": "web",
   "main": "index.html",
   "title": "Home",
