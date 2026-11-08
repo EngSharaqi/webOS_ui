@@ -19,12 +19,25 @@ Chromium 53 — six years older than the one the original was built against.
   and written into `apps.js`.
 - **Categories.** `config.js` takes a `categories` list; the grid grows a heading per section and
   anything uncategorised collects under `otherTitle`.
-- **Rearranging across sections.** An **Edit** pill in the top bar, alongside holding OK, and a
-  tile dragged into another section now joins it. The arrangement is saved per section.
+- **The top row is what you open.** It is no longer a hand-pinned dock: the launcher counts how
+  often you open each app, with a three-day half-life, and the four it lands on sit in the top row —
+  as well as in their own category, so nothing moves out of where you look for it. `dockApps` in
+  `config.js` fills the row until there is enough history. Nothing leaves the TV: the count is in
+  the app's own `localStorage`.
+- **Rearranging in two steps.** The **Edit** pill, or holding OK on a tile, turns arranging on and
+  it stays on: the arrows walk the grid, OK takes a tile in hand, OK again puts it down, and Back
+  leaves. A tile carried into another section joins it, and the arrangement is saved per section.
+  The top row is the launcher's own and is not rearranged by hand.
+- **A held OK is recognised on any remote.** webOS remotes disagree about what a held key sends —
+  one keydown, repeating keydowns, or keydown/keyup pairs — and on this TV the pairs made every
+  hold open the app instead. The hold is now timed from the first keydown and the press counts as
+  over only once nothing has arrived for 180 ms.
+- **A quieter focus.** The white wash and outer glow over the focused tile are gone; what springs
+  between tiles is a thin glass ring, and the tile itself grows a little more instead.
 
 ![The launcher running on an LG OLED C6](docs/screenshot.jpg)
 
-Tested on an LG OLED C6 (OLED55C6XLA, webOS 26, firmware 43.21.79).
+The screenshot is the original's, on an LG OLED C6 (webOS 26).
 
 ## What's different from Android
 
@@ -66,9 +79,9 @@ npx -y -p @webos-tools/cli ares-setup-device -m lgtv -i "{'privatekey':'lgtv_web
 **3. Install**
 
 ```bash
-git clone https://github.com/OmkarK97/webos-vibehack.git
-cd webos-vibehack
-python3 -m venv venv && venv/bin/pip install websockets
+git clone https://github.com/EngSharaqi/webOS_ui.git
+cd webOS_ui
+python3 -m venv venv && venv/bin/pip install websockets pillow
 TV_HOST=192.168.1.50 ./install.sh
 ```
 
@@ -107,17 +120,21 @@ as a Raspberry Pi.
 
 ## Using it
 
-Same as the [Android launcher](https://github.com/Gathin23/tv-vibehack#the-launcher): a dock of four apps with the focused app's name above it and a glow
-in its colour, the rest of your apps in a grid below, and Inputs (HDMI ports and Live TV), Wi-Fi
-and Settings at the top. The header slides away when the grid scrolls into it.
+Close to the [Android launcher](https://github.com/Gathin23/tv-vibehack#the-launcher): a top row of
+four apps with the focused app's name above it and a glow in its colour, your apps in categories
+below, and Inputs (HDMI ports and Live TV), Wi-Fi and Settings at the top. The header slides away
+when the grid scrolls into it. Unlike the Android one, the top row holds the apps you open most
+rather than a fixed dock.
 
-**Rearrange tiles on the TV**: hold **OK** on a tile until it wiggles, move it with the arrows
-(into the top row puts it in the dock), then **OK** to place it or **Back** to cancel. The order is
-saved on the TV.
+**Rearrange tiles on the TV**: the **Edit** pill, or holding **OK** on a tile, starts arranging.
+Then the arrows move between tiles, **OK** takes one in hand (it wiggles) and **OK** puts it down,
+including in another category; **Back** cancels a tile in hand, and **Back** again leaves
+arranging. The order is saved on the TV.
 
-**Configure** in [`app/config.js`](app/config.js): the starting dock, apps to hide, the Live TV
-app and the number of columns. App ids come from `venv/bin/python sync-apps.py $TV_HOST --list`.
-Changing `dockApps` resets an order arranged on the TV.
+**Configure** in [`app/config.js`](app/config.js): the categories, the apps that fill the top row
+until the TV knows what you watch, apps to hide, the Live TV app and the number of columns. App ids
+come from `venv/bin/python sync-apps.py $TV_HOST --list`. Changing the category titles or
+`dockApps` resets an order arranged on the TV.
 
 ## Cleaning up LG's home
 
@@ -147,6 +164,7 @@ For when you do land on it. Names vary a little by webOS version:
 | [`app/`](app/) | The launcher: `index.html`, `style.css`, `app.js`, `config.js`, `appinfo.json` |
 | [`install.sh`](install.sh) | Syncs your apps, packages and installs the launcher, and opens it |
 | [`sync-apps.py`](sync-apps.py) | Reads apps, icons and HDMI inputs from the TV into `app/apps.js` and `app/icons/` |
+| [`bake-colors.py`](bake-colors.py) | Measures each icon's tile and glow colour into `app/apps.js` (needs Pillow) |
 | [`home-watch.py`](home-watch.py) | Sends the Home button to the launcher |
 | [`home-watch-mac.sh`](home-watch-mac.sh) | Runs the watcher as a macOS background service |
 | [`lgtv.py`](lgtv.py) | Pairs with and talks to the TV's remote-control service |

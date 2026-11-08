@@ -14,8 +14,8 @@
   var DOCK_TOP = 708;           // tile top of the dock row: next row peeks in at the bottom
   var DOCK_GAP = 36;            // extra space below the dock
   var HEADER_H = 96;            // space a section title takes above its first row
-  var FOCUS_SCALE = 1.1;
-  var GLASS_PAD = 12;           // room for the glass glow around the scaled tile
+  var FOCUS_SCALE = 1.14;
+  var GLASS_PAD = 6;            // how far the glass ring sits outside the scaled tile
   var VIEW_TOP = 80, VIEW_BOTTOM = 1060;    // area grid rows scroll into (the header hides below the dock)
 
   var KEY = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, OK: 13, BACK: 461, ESC: 27 };
@@ -42,7 +42,8 @@
   var zone = 'grid';            // 'grid' | 'top' | 'inputs'
   var focused = 0, pillFocus = 0, inputFocus = 0, inputRows = [];
   var offset = 0, heroShown = false, glassShown = false;
-  var editing = null;           // {item, snapshot} while a tile is being moved
+  var editMode = false;         // arranging: the arrows pick a tile, OK takes it in hand
+  var editing = null;           // {item, snapshot, sizes} while a tile is in hand
 
   // ---- luna bus ------------------------------------------------------------------------------
 
@@ -65,6 +66,7 @@
   }
 
   function launch(id, title, params) {
+    noteLaunch(id);
     luna('luna://com.webos.applicationManager/launch', { id: id, params: params || {} }, function (res) {
       if (res.returnValue === false) toast("Can't open " + (title || id));
     });
@@ -79,9 +81,54 @@
     toastTimer = setTimeout(function () { t.classList.remove('shown'); }, 2200);
   }
 
+  // ---- what gets opened ----------------------------------------------------------------------
+
+  var USE_KEY = 'tvhome.use';
+
+  /** How often each app has been opened from here: {id: {n: times, at: last time}}. */
+  function loadUse() {
+    try { return JSON.parse(localStorage.getItem(USE_KEY)) || {}; } catch (e) { return {}; }
+  }
+
+  function noteLaunch(id) {
+    try {
+      var use = loadUse();
+      var st = use[id] || { n: 0, at: 0 };
+      st.n++;
+      st.at = Date.now();
+      use[id] = st;
+      localStorage.setItem(USE_KEY, JSON.stringify(use));
+    } catch (e) { /* storage unavailable: the top row stays on the configured apps */ }
+  }
+
+  /**
+   * The apps for the top row: most opened first, counted with a three-day half-life so something
+   * you have stopped watching drops out and whatever you are on now climbs.
+   */
+  function recentIds(all) {
+    var use = loadUse(), now = Date.now(), scored = [];
+    all.forEach(function (a) {
+      var st = use[a.id];
+      if (!st) return;
+      var days = (now - (st.at || 0)) / 86400000;
+      scored.push({ id: a.id, score: st.n * Math.pow(0.5, days / 3), at: st.at || 0 });
+    });
+    scored.sort(function (x, y) { return (y.score - x.score) || (y.at - x.at); });
+    var ids = scored.slice(0, COLUMNS).map(function (s) { return s.id; });
+    (CONFIG.dockApps || []).forEach(function (id) {       // not enough history yet: config fills in
+      if (ids.length < COLUMNS && ids.indexOf(id) < 0) ids.push(id);
+    });
+    return ids;
+  }
+
+  /** The top row as it stands, to notice when coming back from an app has changed it. */
+  function dockSignature() {
+    return items.slice(0, counts[0] || 0).map(function (it) { return it.app.id; }).join(',');
+  }
+
   // ---- apps ----------------------------------------------------------------------------------
 
-  /** The dock, then one group per configured category, then everything left over. */
+  /** The top row, then one group per configured category, then everything left over. */
   function sectionPlan() {
     var all = (window.TV_APPS && TV_APPS.apps) || [];
     var byId = {};
@@ -90,7 +137,7 @@
     (CONFIG.hiddenApps || []).forEach(function (id) { taken[id] = true; });
     var byTitle = function (a, b) { return a.title.toLowerCase() < b.title.toLowerCase() ? -1 : 1; };
 
-    var secTitles = [null];                                         // the dock carries no heading
+    var secTitles = [null];                                   // the top row is named by the shelf
     (CONFIG.categories || []).forEach(function (c) { secTitles.push(c.title); });
     secTitles.push(CONFIG.otherTitle || 'More');
     var groups = secTitles.map(function () { return []; });
@@ -101,12 +148,20 @@
       });
     };
 
-    // An arrangement made on the TV wins, until the categories in config.js change.
+    // The top row is the launcher's own: what you open most, and a shortcut there as well as in
+    // its category, so it is not marked taken and cannot be rearranged by hand.
+    recentIds(all).forEach(function (id) {
+      if (byId[id] && !taken[id]) groups[0].push(byId[id]);
+    });
+    if (!groups[0].length) {                                  // nothing opened yet and no dockApps
+      groups[0] = all.filter(function (a) { return !taken[a.id]; }).sort(byTitle).slice(0, COLUMNS);
+    }
+
+    // An arrangement made on the TV wins for the categories, until config.js changes.
     var saved = loadOrder();
     if (saved) {
-      groups.forEach(function (g, i) { take(saved[i], g); });
+      groups.forEach(function (g, i) { if (i) take(saved[i], g); });
     } else {
-      take(CONFIG.dockApps, groups[0]);
       (CONFIG.categories || []).forEach(function (cat, i) {
         take(cat.apps, groups[i + 1]);
         groups[i + 1].sort(byTitle);
@@ -222,7 +277,8 @@
         if (zone !== 'inputs' && !editing) focusTile(items.indexOf(item));
       });
       el.addEventListener('click', function () {
-        if (editing) finishEdit(true);
+        if (editing) dropTile(true);
+        else if (editMode) { focusTile(items.indexOf(item)); pickUpTile(); }
         else launch(app.id, app.title);
       });
       tilesEl.appendChild(el);
@@ -523,7 +579,8 @@
     if (i === 0) showInputs();
     else if (i === 1) launch('com.palm.app.settings', 'Settings', { target: 'network' });
     else if (i === 2) launch('com.palm.app.settings', 'Settings');
-    else { focusTile(focused); startEdit(); }
+    else if (editMode) exitEditMode();
+    else { focusTile(Math.max(focused, counts[0] || 0)); enterEditMode(); }
   }
 
   // ---- inputs dropdown -----------------------------------------------------------------------
@@ -578,14 +635,51 @@
 
   // ---- rearranging ---------------------------------------------------------------------------
 
-  /** Hold OK on a tile: it wiggles, the arrows move it, OK places it, Back puts everything back. */
-  function startEdit() {
+  /**
+   * Two steps, so one visit arranges as many tiles as you like: Edit (or holding OK) turns
+   * arranging on, then inside it the arrows walk the grid, OK takes a tile in hand and OK again
+   * puts it down. Back drops the tile where it was, or leaves arranging when nothing is in hand.
+   */
+  function enterEditMode(hint) {
+    if (editMode) return;
+    editMode = true;
+    document.body.classList.add('editing');
+    if (hint !== false) toast('Arranging  ·  OK to pick a tile up  ·  Back when done');
+  }
+
+  function exitEditMode() {
+    if (editing) dropTile(false);
+    editMode = false;
+    document.body.classList.remove('editing');
+    toast('Arrangement saved');
+  }
+
+  /** Takes the focused tile in hand. The top row is the launcher's own, so it stays put. */
+  function pickUpTile() {
     var it = items[focused];
-    if (!it) return;
+    if (!it || editing) return;
+    if (sectionOf(focused) === 0) {
+      toast('The top row follows the apps you open');
+      return;
+    }
     editing = { item: it, snapshot: items.slice(), sizes: counts.slice() };
     it.el.classList.add('moving');
-    document.body.classList.add('editing');
-    toast('Arrows to move  ·  OK to place  ·  Back to cancel');
+  }
+
+  /** Puts the tile in hand down where it is now, or back where it came from. */
+  function dropTile(keep) {
+    if (!editing) return;
+    var it = editing.item;
+    if (!keep) {
+      items = editing.snapshot;
+      counts = editing.sizes;
+      layout();
+    }
+    editing = null;
+    it.el.classList.remove('moving');
+    if (keep) saveOrder();
+    focused = items.indexOf(it);
+    focusTile(focused);
   }
 
   /** Which section a place in the flat list falls in, by walking the section sizes. */
@@ -604,9 +698,9 @@
     return row.items[Math.min(col, row.items.length - 1)];
   }
 
-  /** Moves the tile being arranged, handing it to whichever section it lands in. */
+  /** Moves the tile in hand, handing it to whichever section it lands in; never the top row. */
   function moveTo(to) {
-    to = Math.max(0, Math.min(to, items.length - 1));
+    to = Math.max(counts[0] || 0, Math.min(to, items.length - 1));
     if (to === focused) return;
     counts[sectionAt(focused)]--;
     var moved = items.splice(focused, 1)[0];
@@ -617,49 +711,72 @@
     focusTile(to);
   }
 
-  function finishEdit(keep) {
-    var it = editing.item;
-    if (!keep) {
-      items = editing.snapshot;
-      counts = editing.sizes;
-      layout();
-    }
-    editing = null;
-    it.el.classList.remove('moving');
-    document.body.classList.remove('editing');
-    if (keep) saveOrder();
-    focused = items.indexOf(it);
-    focusTile(focused);
-  }
-
   // ---- keys ----------------------------------------------------------------------------------
 
   var LONG_PRESS_MS = 600;
-  var okDown = false, okTimer = null;
+  var REPEAT_GAP = 180;         // a gap longer than this between OK events means the key came up
+  var okStart = 0, okHold = null, okRelease = null, okHandled = false;
 
-  // On tiles OK acts on release, so a held OK can start rearranging instead of opening the app.
+  /**
+   * A held OK on a tile starts arranging instead of opening the app. webOS remotes differ in what
+   * they send while OK is held — one keydown, repeating keydowns, or keydown/keyup pairs — so the
+   * press is timed from the first keydown and only counted as over once nothing has arrived for
+   * REPEAT_GAP. Arranging starts the moment the hold is long enough, so it is felt, not guessed.
+   */
+  function okPressed() {
+    clearTimeout(okRelease);
+    okRelease = null;
+    if (okStart) return;                       // still the same press: a repeat, or its keyup
+    okStart = Date.now();
+    okHandled = false;
+    okHold = setTimeout(function () {
+      okHold = null;
+      okHandled = true;                        // the hold became a rearrange: releasing does nothing
+      enterEditMode(false);
+      pickUpTile();
+      toast('Arrows to move  ·  OK to put it down  ·  Back to cancel');
+    }, LONG_PRESS_MS);
+  }
+
+  function okReleased() {
+    if (!okStart || okRelease) return;
+    okRelease = setTimeout(function () {
+      var held = Date.now() - okStart;
+      okStart = 0;
+      okRelease = null;
+      clearTimeout(okHold);
+      okHold = null;
+      if (okHandled || held >= LONG_PRESS_MS) return;
+      var it = items[focused];
+      if (it) launch(it.app.id, it.app.title);
+    }, REPEAT_GAP);
+  }
+
   document.addEventListener('keyup', function (e) {
-    if (e.keyCode !== KEY.OK) return;
-    okDown = false;
-    if (!okTimer) return;
-    clearTimeout(okTimer);
-    okTimer = null;
-    var it = items[focused];
-    if (zone === 'grid' && it && !editing) launch(it.app.id, it.app.title);
+    if (e.keyCode === KEY.OK) okReleased();
   });
 
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
-    if (k === KEY.OK && okDown) { e.preventDefault(); return; }   // key repeat while held
-    if (k === KEY.OK) okDown = true;
+    // A tile's OK waits for the release, to tell a tap from a hold. Everywhere else it acts at once.
+    if (k === KEY.OK && zone === 'grid' && !editMode) { okPressed(); e.preventDefault(); return; }
     if (editing) {
       var er = rowOf(focused), ec = colOf(focused);
       if (k === KEY.LEFT) moveTo(focused - 1);
       else if (k === KEY.RIGHT) moveTo(focused + 1);
       else if (k === KEY.UP) moveTo(er > 0 ? nearestIn(er - 1, ec) : 0);
       else if (k === KEY.DOWN) moveTo(er + 1 < rows.length ? nearestIn(er + 1, ec) : items.length - 1);
-      else if (k === KEY.OK) finishEdit(true);
-      else if (k === KEY.BACK || k === KEY.ESC) finishEdit(false);
+      else if (k === KEY.OK) dropTile(true);
+      else if (k === KEY.BACK || k === KEY.ESC) dropTile(false);
+      else return;
+    } else if (editMode) {
+      var mr = rowOf(focused), mc = colOf(focused);
+      if (k === KEY.LEFT) { if (mc > 0) focusTile(rows[mr].items[mc - 1]); }
+      else if (k === KEY.RIGHT) { if (mc + 1 < rows[mr].items.length) focusTile(rows[mr].items[mc + 1]); }
+      else if (k === KEY.UP) { if (mr > 0) focusTile(nearestIn(mr - 1, mc)); }
+      else if (k === KEY.DOWN) { if (mr + 1 < rows.length) focusTile(nearestIn(mr + 1, mc)); }
+      else if (k === KEY.OK) pickUpTile();
+      else if (k === KEY.BACK || k === KEY.ESC) exitEditMode();
       else return;
     } else if (zone === 'inputs') {
       if (k === KEY.UP) focusInput(inputFocus - 1);
@@ -684,7 +801,7 @@
       } else if (k === KEY.DOWN) {
         if (r + 1 < rows.length) focusTile(nearestIn(r + 1, col));
       } else if (k === KEY.OK) {
-        okTimer = setTimeout(function () { okTimer = null; startEdit(); }, LONG_PRESS_MS);
+        okPressed();                      // zone 'none', before the first tile has taken focus
       } else if (k === KEY.BACK) { /* home screen: Back goes nowhere */ }
       else return;
     }
@@ -700,13 +817,34 @@
 
   /** Back from another app (or opened again from the shortcut): replay the entrance, keep the tile. */
   function resume() {
-    if (editing) finishEdit(false);
+    if (editing) dropTile(false);
+    if (editMode) { editMode = false; document.body.classList.remove('editing'); }
+    okStart = 0;
+    clearTimeout(okHold);
+    clearTimeout(okRelease);
     updateClock();
     if (zone === 'inputs') panel.classList.add('hidden');
     pills.forEach(function (p) { p.classList.remove('focused'); });
     zone = 'none';
+    // Opening an app changes what the top row should hold: rebuild when it no longer matches.
+    var want = recentRow();
+    if (want.length && want.join(',') !== dockSignature()) {
+      var was = items[focused] && items[focused].app.id;
+      build();
+      focused = 0;
+      items.some(function (it, i) { if (it.app.id === was) { focused = i; return true; } });
+    }
     animateIn();
     focusTile(focused);
+  }
+
+  /** What the top row would hold now, to compare against what it holds. */
+  function recentRow() {
+    var all = (window.TV_APPS && TV_APPS.apps) || [];
+    var ok = {};
+    all.forEach(function (a) { ok[a.id] = true; });
+    (CONFIG.hiddenApps || []).forEach(function (id) { ok[id] = false; });
+    return recentIds(all).filter(function (id) { return ok[id]; });
   }
 
   document.addEventListener('webOSRelaunch', resume);

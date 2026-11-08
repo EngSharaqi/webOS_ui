@@ -1,7 +1,8 @@
 // Launcher configuration. Edit this file, then run install.sh.
 // App ids: run `python3 sync-apps.py --list` (or look in app/apps.js after a sync).
 window.CONFIG = {
-  // Apps pinned to the dock row at the bottom, in this order. Missing apps are skipped.
+  // The top row holds the apps you open most, newest use first, kept by the launcher itself.
+  // These fill it until you have opened enough apps for the TV to know. Missing apps are skipped.
   dockApps: ['netflix', 'youtube.leanback.v4', 'com.apple.appletv.web', 'net.mbc.shahid-lgapp'],
 
   // Apps never shown as tiles (inputs and Live TV are already in the Inputs menu).
@@ -19,17 +20,16 @@ window.CONFIG = {
   categories: [
     {
       title: 'Watch',
-      apps: ['smarttv.spark.yango.com', 'watchit.com', 'com.webos.app.photovideo',
-             'com.webos.app.discovery']
+      apps: ['smarttv.spark.yango.com', 'watchit.com']
     },
     {
-      title: 'Listen',
+      title: 'Music',
       apps: ['anghami', 'spotify-beehive', 'com.webos.app.music']
     },
     {
       title: 'System',
-      apps: ['com.webos.app.browser', 'com.webos.app.homeconnect', 'com.palmdts.devmode',
-             'org.webosbrew.hbchannel']
+      apps: ['com.webos.app.discovery', 'com.webos.app.photovideo', 'com.webos.app.browser',
+             'com.webos.app.homeconnect', 'com.palmdts.devmode', 'org.webosbrew.hbchannel']
     }
   ],
 
